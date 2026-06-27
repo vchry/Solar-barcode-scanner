@@ -261,6 +261,37 @@
             font-weight: 400;
         }
 
+        /* ─── Camera switch button ─── */
+        .camera-switch-btn {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 15;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #e8edf5;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: background 0.2s;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+        }
+        .camera-switch-btn:active {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(0.92);
+        }
+        .camera-switch-btn.hidden {
+            display: none;
+        }
+
         /* ─── Permission / Welcome Overlay ─── */
         .perm-overlay {
             position: absolute;
@@ -628,6 +659,13 @@
                 padding: 12px 24px;
                 font-size: 1rem;
             }
+            .camera-switch-btn {
+                width: 38px;
+                height: 38px;
+                font-size: 1.2rem;
+                top: 12px;
+                right: 12px;
+            }
         }
 
         @media (min-width: 600px) {
@@ -679,6 +717,9 @@
             </div>
 
             <div class="viewfinder-hint">Align barcode in the frame</div>
+
+            <!-- Camera switch button -->
+            <button class="camera-switch-btn hidden" id="cameraSwitchBtn" title="Switch camera">🔄</button>
 
             <!-- Permission / Welcome Overlay -->
             <div class="perm-overlay" id="permOverlay">
@@ -741,6 +782,7 @@
             const overlayIcon = document.getElementById('overlayIcon');
             const overlayTitle = document.getElementById('overlayTitle');
             const overlayDesc = document.getElementById('overlayDesc');
+            const cameraSwitchBtn = document.getElementById('cameraSwitchBtn');
             const btnCopyBatch = document.getElementById('btnCopyBatch');
             const btnClearSession = document.getElementById('btnClearSession');
             const btnClearLast = document.getElementById('btnClearLast');
@@ -756,6 +798,8 @@
             let isScanning = false;
             let toastTimer = null;
             let isStarting = false;
+            let currentFacingMode = 'environment'; // 'environment' or 'user'
+            let hasMultipleCameras = false;
 
             // ─── Audio: beep via Web Audio ───
             function playBeep() {
@@ -937,10 +981,27 @@
                 }
             }
 
+            // ─── Check camera count ───
+            async function checkCameras() {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    hasMultipleCameras = videoDevices.length > 1;
+                    if (hasMultipleCameras) {
+                        cameraSwitchBtn.classList.remove('hidden');
+                    } else {
+                        cameraSwitchBtn.classList.add('hidden');
+                    }
+                } catch (_) {
+                    cameraSwitchBtn.classList.add('hidden');
+                }
+            }
+
             // ─── Scanner setup ───
-            async function initScanner() {
+            async function initScanner(facingMode = currentFacingMode) {
                 if (isStarting) return;
                 if (scanner && isScanning) {
+                    // if already running, just ensure the overlay is hidden
                     permOverlay.classList.add('hidden');
                     errorMsg.textContent = '';
                     return;
@@ -962,6 +1023,7 @@
                 }
 
                 try {
+                    // Create new scanner
                     scanner = new Html5Qrcode('reader');
 
                     const config = {
@@ -973,19 +1035,19 @@
                         aspectRatio: 1.0,
                     };
 
-                    // Try to use rear camera; fallback to any available
-                    let cameraId = { facingMode: 'environment' };
+                    // Determine camera constraints
+                    let cameraConstraints = { facingMode: facingMode };
+                    // If facingMode is not available, fallback to any camera
                     try {
                         const devices = await navigator.mediaDevices.enumerateDevices();
                         const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                        const hasEnv = videoDevices.some(d => d.label && d.label.toLowerCase().includes('back'));
-                        if (!hasEnv && videoDevices.length > 0) {
-                            cameraId = { deviceId: videoDevices[0].deviceId };
-                        }
+                        if (videoDevices.length === 0) throw new Error('No cameras found');
+                        // Check if the chosen facingMode is available
+                        // We'll just pass constraints and let the browser pick.
                     } catch (_) {}
 
                     await scanner.start(
-                        cameraId,
+                        cameraConstraints,
                         config,
                         onScanSuccess,
                         onScanError
@@ -1002,6 +1064,9 @@
                     btnStartScanner.textContent = 'Start Scanning';
                     btnRetry.classList.add('hidden');
 
+                    // Show camera switch button if multiple cameras
+                    await checkCameras();
+
                 } catch (err) {
                     console.error('Scanner start error:', err);
                     isStarting = false;
@@ -1009,10 +1074,8 @@
                     permOverlay.classList.remove('hidden');
                     let errorMessage = 'Unable to access camera. ';
                     if (err && err.message) {
-                        if (err.message.includes('Permission')) {
+                        if (err.message.includes('Permission') || err.message.includes('NotAllowedError')) {
                             errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
-                        } else if (err.message.includes('NotAllowedError')) {
-                            errorMessage = 'Camera access was blocked. Please allow camera permission and retry.';
                         } else if (err.message.includes('NotFoundError')) {
                             errorMessage = 'No camera found on your device.';
                         } else {
@@ -1028,6 +1091,7 @@
                     overlayDesc.textContent = 'Could not start the camera.';
                     btnStartScanner.textContent = 'Retry';
                     isScanning = false;
+                    cameraSwitchBtn.classList.add('hidden');
                 }
             }
 
@@ -1063,6 +1127,19 @@
                 }
             }
 
+            // ─── Switch camera ───
+            async function switchCamera() {
+                if (!isScanning) return;
+                // Toggle facing mode
+                const newMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+                currentFacingMode = newMode;
+                // Stop current scanner
+                stopScanner();
+                // Re-init with new mode
+                await initScanner(currentFacingMode);
+                // If success, scanner is running; if error, overlay shows
+            }
+
             // ─── Retry / restart ───
             function retryScanner() {
                 stopScanner();
@@ -1074,7 +1151,7 @@
                 errorMsg.textContent = '';
                 btnRetry.classList.add('hidden');
                 permOverlay.classList.remove('hidden');
-                initScanner();
+                initScanner(currentFacingMode);
             }
 
             // ─── Event listeners ───
@@ -1085,11 +1162,10 @@
                     errorMsg.textContent = '';
                     return;
                 }
-                // If the button says "Retry", we re-init
                 if (btnStartScanner.textContent === 'Retry') {
                     retryScanner();
                 } else {
-                    initScanner();
+                    initScanner(currentFacingMode);
                 }
             });
             btnStartScanner.addEventListener('touchend', (e) => {
@@ -1104,6 +1180,15 @@
             btnRetry.addEventListener('touchend', (e) => {
                 e.preventDefault();
                 btnRetry.click();
+            });
+
+            cameraSwitchBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                switchCamera();
+            });
+            cameraSwitchBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                cameraSwitchBtn.click();
             });
 
             btnCopyBatch.addEventListener('click', copyBatch);
@@ -1154,6 +1239,7 @@
             btnStartScanner.textContent = 'Start Scanning';
             btnStartScanner.disabled = false;
             btnRetry.classList.add('hidden');
+            cameraSwitchBtn.classList.add('hidden');
             overlayIcon.textContent = '📷';
             overlayTitle.textContent = 'Ready to Scan';
             overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
@@ -1169,6 +1255,9 @@
                 return;
             }
 
+            // Check cameras count initially
+            checkCameras();
+
             // ─── Page unload ───
             window.addEventListener('beforeunload', () => {
                 stopScanner();
@@ -1181,6 +1270,7 @@
                 scannedCodes: () => [...scannedCodes],
                 uniqueCount: () => uniqueSet.size,
                 retry: retryScanner,
+                switchCamera,
             };
 
         })();
