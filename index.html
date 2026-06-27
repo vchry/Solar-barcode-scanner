@@ -232,6 +232,15 @@
             opacity: 1;
             background: linear-gradient(90deg, transparent, #00ffb4, transparent);
         }
+
+        /* Duplicate-scan feedback (amber, distinct from success green) */
+        .target-rect.duplicate {
+            border-color: rgba(255, 184, 0, 0.7);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 30px rgba(255, 184, 0, 0.15);
+        }
+        .target-rect.duplicate .corner {
+            border-color: #ffb800;
+        }
         @keyframes scanMove {
             0%,
             100% {
@@ -893,6 +902,9 @@
                 if (idx === -1) return;
                 scannedCodes.splice(idx, 1);
                 uniqueSet.delete(value);
+                if (lastScan && lastScan.value === value) {
+                    lastScan = null; // allow immediate re-scan since it's no longer in the list
+                }
                 renderList();
                 countDisplay.textContent = uniqueSet.size;
                 if (scannedCodes.length === 0) {
@@ -919,22 +931,18 @@
 
             // ─── Add scan (strictly no duplicates) ───
             function addScan(value, format) {
-                // 1. Check if already in uniqueSet (duplicate)
+                // 1. Check if already in uniqueSet (duplicate) -> never add it again
                 if (uniqueSet.has(value)) {
-                    // Duplicate – ignore silently
+                    handleDuplicateScan(value);
                     return false;
                 }
 
-                // 2. Check cooldown for the exact same value (though if it's not in uniqueSet, it's new)
-                // But we still respect cooldown to prevent rapid-fire of the same value before it's added?
-                // Actually if it's not in uniqueSet, it's new, so cooldown doesn't apply.
-                // However, we can keep cooldown for the same value to avoid adding it twice if the scanner
-                // reads it rapidly before the first one is processed. But since we add immediately, it's fine.
-                // We'll keep lastScan check but it's redundant because if it's new, it's not in lastScan.
+                // 2. Cooldown guard against the scanner firing the same brand-new
+                // value multiple times within a single pass before it lands in uniqueSet.
                 const now = Date.now();
                 if (lastScan && lastScan.value === value) {
                     if (now - lastScan.timestamp < COOLDOWN_MS) {
-                        return false; // rapid-fire same code within cooldown
+                        return false;
                     }
                 }
 
@@ -965,6 +973,24 @@
                     listContainer.scrollTop = 0;
                 }
                 return true;
+            }
+
+            // ─── Duplicate feedback (no add, just let the user know) ───
+            let lastDuplicateToastAt = 0;
+            function handleDuplicateScan(value) {
+                // Throttle the toast so holding a duplicate barcode in frame
+                // doesn't spam notifications every animation frame.
+                const now = Date.now();
+                if (now - lastDuplicateToastAt < 1200) return;
+                lastDuplicateToastAt = now;
+
+                targetRect.classList.add('duplicate');
+                setTimeout(() => targetRect.classList.remove('duplicate'), 300);
+
+                showToast('Already scanned', '⚠️', 1200);
+                try {
+                    if (navigator.vibrate) navigator.vibrate(30);
+                } catch (_) {}
             }
 
             // ─── Copy batch ───
