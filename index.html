@@ -790,7 +790,7 @@
             const toast = document.getElementById('toast');
 
             // ─── State ───
-            let scannedCodes = [];
+            let scannedCodes = []; // only unique values (no duplicates ever)
             let uniqueSet = new Set();
             let lastScan = null;
             const COOLDOWN_MS = 2000;
@@ -849,6 +849,7 @@
                 }
                 listEmpty.classList.add('hidden');
 
+                // Show most recent first (reverse order)
                 const reversed = [...scannedCodes].reverse();
                 for (const item of reversed) {
                     const row = document.createElement('div');
@@ -891,7 +892,7 @@
                 const idx = scannedCodes.findIndex(item => item.value === value);
                 if (idx === -1) return;
                 scannedCodes.splice(idx, 1);
-                uniqueSet = new Set(scannedCodes.map(item => item.value));
+                uniqueSet.delete(value);
                 renderList();
                 countDisplay.textContent = uniqueSet.size;
                 if (scannedCodes.length === 0) {
@@ -916,21 +917,32 @@
                 showToast(`Removed: ${last.value}`, '↩', 1200);
             }
 
-            // ─── Add scan ───
+            // ─── Add scan (strictly no duplicates) ───
             function addScan(value, format) {
+                // 1. Check if already in uniqueSet (duplicate)
+                if (uniqueSet.has(value)) {
+                    // Duplicate – ignore silently
+                    return false;
+                }
+
+                // 2. Check cooldown for the exact same value (though if it's not in uniqueSet, it's new)
+                // But we still respect cooldown to prevent rapid-fire of the same value before it's added?
+                // Actually if it's not in uniqueSet, it's new, so cooldown doesn't apply.
+                // However, we can keep cooldown for the same value to avoid adding it twice if the scanner
+                // reads it rapidly before the first one is processed. But since we add immediately, it's fine.
+                // We'll keep lastScan check but it's redundant because if it's new, it's not in lastScan.
                 const now = Date.now();
                 if (lastScan && lastScan.value === value) {
                     if (now - lastScan.timestamp < COOLDOWN_MS) {
-                        return false;
+                        return false; // rapid-fire same code within cooldown
                     }
                 }
+
+                // Update lastScan
                 lastScan = { value, timestamp: now };
 
-                const isDuplicate = uniqueSet.has(value);
-                if (!isDuplicate) {
-                    uniqueSet.add(value);
-                }
-
+                // Add to set and array
+                uniqueSet.add(value);
                 scannedCodes.push({
                     value: value,
                     format: format || 'CODE',
@@ -940,12 +952,15 @@
                 renderList();
                 countDisplay.textContent = uniqueSet.size;
 
+                // Visual feedback
                 targetRect.classList.add('flash');
                 setTimeout(() => targetRect.classList.remove('flash'), 300);
 
+                // Audio & haptic
                 playBeep();
                 triggerHaptic();
 
+                // Scroll to top to show new item
                 if (listContainer) {
                     listContainer.scrollTop = 0;
                 }
@@ -1001,7 +1016,6 @@
             async function initScanner(facingMode = currentFacingMode) {
                 if (isStarting) return;
                 if (scanner && isScanning) {
-                    // if already running, just ensure the overlay is hidden
                     permOverlay.classList.add('hidden');
                     errorMsg.textContent = '';
                     return;
@@ -1023,7 +1037,6 @@
                 }
 
                 try {
-                    // Create new scanner
                     scanner = new Html5Qrcode('reader');
 
                     const config = {
@@ -1035,15 +1048,12 @@
                         aspectRatio: 1.0,
                     };
 
-                    // Determine camera constraints
                     let cameraConstraints = { facingMode: facingMode };
-                    // If facingMode is not available, fallback to any camera
+                    // Fallback if facingMode fails
                     try {
                         const devices = await navigator.mediaDevices.enumerateDevices();
                         const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                        if (videoDevices.length === 0) throw new Error('No cameras found');
-                        // Check if the chosen facingMode is available
-                        // We'll just pass constraints and let the browser pick.
+                        if (videoDevices.length === 0) throw new Error('No cameras');
                     } catch (_) {}
 
                     await scanner.start(
@@ -1064,7 +1074,6 @@
                     btnStartScanner.textContent = 'Start Scanning';
                     btnRetry.classList.add('hidden');
 
-                    // Show camera switch button if multiple cameras
                     await checkCameras();
 
                 } catch (err) {
@@ -1109,7 +1118,6 @@
             }
 
             function onScanError(err) {
-                // ignore normal no-barcode errors
                 if (err && err.toString && (err.toString().includes('NotFoundException') || err.toString().includes(
                         'NoMultiFormatReaders'))) {
                     return;
@@ -1130,20 +1138,15 @@
             // ─── Switch camera ───
             async function switchCamera() {
                 if (!isScanning) return;
-                // Toggle facing mode
                 const newMode = currentFacingMode === 'environment' ? 'user' : 'environment';
                 currentFacingMode = newMode;
-                // Stop current scanner
                 stopScanner();
-                // Re-init with new mode
                 await initScanner(currentFacingMode);
-                // If success, scanner is running; if error, overlay shows
             }
 
             // ─── Retry / restart ───
             function retryScanner() {
                 stopScanner();
-                // Reset overlay to default
                 overlayIcon.textContent = '📷';
                 overlayTitle.textContent = 'Ready to Scan';
                 overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
@@ -1244,7 +1247,6 @@
             overlayTitle.textContent = 'Ready to Scan';
             overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
 
-            // Check if camera is supported
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 permOverlay.classList.remove('hidden');
                 overlayIcon.textContent = '⚠️';
@@ -1255,15 +1257,12 @@
                 return;
             }
 
-            // Check cameras count initially
             checkCameras();
 
-            // ─── Page unload ───
             window.addEventListener('beforeunload', () => {
                 stopScanner();
             });
 
-            // ─── Expose for debugging ───
             window.__scanner = {
                 addScan,
                 clearAllScans,
