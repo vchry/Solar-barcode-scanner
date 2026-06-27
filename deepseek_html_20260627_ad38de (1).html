@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Bulk Barcode Scanner</title>
+
+    <!-- html5-qrcode library -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js">
+    </script>
+
+    <style>
+        /* ─── Reset & Base ─── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #0b0d11;
+            color: #e8edf5;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* lock orientation via CSS (most modern browsers respect this) */
+        @media screen and (orientation: landscape) and (max-height: 500px) {
+            body::after {
+                content: "Please rotate your device to portrait mode.";
+                position: fixed;
+                inset: 0;
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #0b0d11;
+                color: #e8edf5;
+                font-size: 1.2rem;
+                padding: 2rem;
+                text-align: center;
+            }
+        }
+
+        /* ─── App Shell ─── */
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
+            max-height: 100vh;
+            max-height: 100dvh;
+            overflow: hidden;
+            background: #0b0d11;
+            position: relative;
+        }
+
+        /* ─── Header ─── */
+        .header {
+            flex-shrink: 0;
+            padding: 12px 16px 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0b0d11;
+            z-index: 10;
+            min-height: 52px;
+        }
+        .header h1 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #e8edf5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header h1 .badge {
+            font-size: 0.55rem;
+            font-weight: 500;
+            background: #2a2f3a;
+            color: #8e9bb5;
+            padding: 2px 8px;
+            border-radius: 20px;
+            letter-spacing: 0.3px;
+        }
+        .header-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .header-actions button {
+            background: transparent;
+            border: none;
+            color: #8e9bb5;
+            font-size: 1.2rem;
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background 0.2s;
+            touch-action: manipulation;
+        }
+        .header-actions button:active {
+            background: #1e222b;
+            color: #e8edf5;
+        }
+
+        /* ─── Camera Viewfinder ─── */
+        .camera-wrapper {
+            flex-shrink: 0;
+            position: relative;
+            width: 100%;
+            height: 42vh;
+            height: 42dvh;
+            min-height: 200px;
+            max-height: 55vh;
+            max-height: 55dvh;
+            background: #000;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #reader {
+            width: 100%;
+            height: 100%;
+            background: #000;
+            position: relative;
+        }
+        #reader video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            display: block !important;
+        }
+
+        /* Hide the default QR box border that html5-qrcode draws */
+        #reader .qrbox {
+            border: none !important;
+            background: transparent !important;
+        }
+
+        /* ─── Target Overlay (reticle) ─── */
+        .target-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .target-rect {
+            position: relative;
+            width: 62%;
+            max-width: 280px;
+            aspect-ratio: 3 / 2;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+            transition: border-color 0.15s;
+        }
+        .target-rect.flash {
+            border-color: rgba(0, 255, 180, 0.7);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 30px rgba(0, 255, 180, 0.15);
+        }
+
+        .target-rect .corner {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border-color: rgba(255, 255, 255, 0.7);
+            border-style: solid;
+            border-width: 0;
+            transition: border-color 0.15s;
+        }
+        .target-rect.flash .corner {
+            border-color: #00ffb4;
+        }
+        .target-rect .corner.tl {
+            top: 6px;
+            left: 6px;
+            border-top-width: 3px;
+            border-left-width: 3px;
+            border-radius: 2px 0 0 0;
+        }
+        .target-rect .corner.tr {
+            top: 6px;
+            right: 6px;
+            border-top-width: 3px;
+            border-right-width: 3px;
+            border-radius: 0 2px 0 0;
+        }
+        .target-rect .corner.bl {
+            bottom: 6px;
+            left: 6px;
+            border-bottom-width: 3px;
+            border-left-width: 3px;
+            border-radius: 0 0 0 2px;
+        }
+        .target-rect .corner.br {
+            bottom: 6px;
+            right: 6px;
+            border-bottom-width: 3px;
+            border-right-width: 3px;
+            border-radius: 0 0 2px 0;
+        }
+
+        .scan-line {
+            position: absolute;
+            left: 8%;
+            right: 8%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 180, 0.5), transparent);
+            top: 20%;
+            animation: scanMove 3s ease-in-out infinite;
+            border-radius: 2px;
+            opacity: 0.5;
+            filter: blur(0.5px);
+        }
+        .target-rect.flash .scan-line {
+            opacity: 1;
+            background: linear-gradient(90deg, transparent, #00ffb4, transparent);
+        }
+        @keyframes scanMove {
+            0%,
+            100% {
+                top: 20%;
+            }
+            50% {
+                top: 70%;
+            }
+        }
+
+        .viewfinder-hint {
+            position: absolute;
+            bottom: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.7rem;
+            letter-spacing: 0.5px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 14px;
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 6;
+            font-weight: 400;
+        }
+
+        /* ─── Permission / Welcome Overlay ─── */
+        .perm-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 20;
+            background: rgba(11, 13, 17, 0.95);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            text-align: center;
+            gap: 16px;
+        }
+        .perm-overlay .icon {
+            font-size: 3.5rem;
+            margin-bottom: 8px;
+        }
+        .perm-overlay h2 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #e8edf5;
+        }
+        .perm-overlay p {
+            font-size: 0.85rem;
+            color: #8e9bb5;
+            max-width: 280px;
+            line-height: 1.5;
+        }
+        .perm-overlay .btn-start {
+            background: #00b894;
+            border: none;
+            color: #0b0d11;
+            font-weight: 600;
+            padding: 14px 40px;
+            border-radius: 14px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            touch-action: manipulation;
+            margin-top: 8px;
+            min-width: 200px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .perm-overlay .btn-start:active {
+            background: #00d4a0;
+            transform: scale(0.97);
+        }
+        .perm-overlay .btn-start:disabled {
+            opacity: 0.5;
+            transform: none;
+            pointer-events: none;
+        }
+        .perm-overlay .error-msg {
+            color: #ff6b6b;
+            font-size: 0.8rem;
+            max-width: 280px;
+            margin-top: 4px;
+            min-height: 1.2em;
+            line-height: 1.4;
+        }
+        .perm-overlay .sub-action {
+            background: transparent;
+            border: none;
+            color: #6a7a94;
+            font-size: 0.75rem;
+            text-decoration: underline;
+            cursor: pointer;
+            padding: 4px 12px;
+            touch-action: manipulation;
+        }
+        .perm-overlay .sub-action:active {
+            color: #e8edf5;
+        }
+
+        /* ─── Status Bar ─── */
+        .status-bar {
+            flex-shrink: 0;
+            padding: 10px 16px 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0b0d11;
+            border-bottom: 1px solid #171b24;
+            z-index: 10;
+            min-height: 48px;
+        }
+        .counter-wrap {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+        .counter-wrap .label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #6a7a94;
+        }
+        .counter-wrap .count {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #e8edf5;
+            line-height: 1;
+            min-width: 2.2rem;
+            text-align: center;
+        }
+        .counter-wrap .count.unique {
+            color: #00d4a0;
+        }
+        .status-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .status-actions button {
+            background: #1a1f2a;
+            border: none;
+            color: #8e9bb5;
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 5px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+            touch-action: manipulation;
+            letter-spacing: 0.3px;
+        }
+        .status-actions button:active {
+            background: #2a303e;
+            color: #e8edf5;
+        }
+
+        /* ─── Scanned List ─── */
+        .list-container {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 4px 12px 12px;
+            background: #0f1219;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        .list-container::-webkit-scrollbar {
+            width: 3px;
+        }
+        .list-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .list-container::-webkit-scrollbar-thumb {
+            background: #2a303e;
+            border-radius: 4px;
+        }
+
+        .list-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px 30px;
+            color: #4a5568;
+            text-align: center;
+        }
+        .list-empty .icon {
+            font-size: 2.8rem;
+            margin-bottom: 12px;
+            opacity: 0.4;
+        }
+        .list-empty p {
+            font-size: 0.85rem;
+            line-height: 1.5;
+            max-width: 240px;
+        }
+
+        .list-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            margin-top: 4px;
+            background: #161b24;
+            border-radius: 10px;
+            border-left: 3px solid #2a303e;
+            animation: slideIn 0.25s ease-out;
+            transition: background 0.15s, opacity 0.2s;
+            touch-action: manipulation;
+        }
+        .list-item:first-of-type {
+            margin-top: 0;
+        }
+        .list-item .code {
+            font-family: "SF Mono", "Menlo", "Monaco", monospace;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #e8edf5;
+            letter-spacing: 0.3px;
+            word-break: break-all;
+            flex: 1;
+            padding-right: 8px;
+        }
+        .list-item .code .badge-format {
+            font-size: 0.55rem;
+            font-weight: 600;
+            color: #6a7a94;
+            background: #1e222b;
+            padding: 1px 8px;
+            border-radius: 12px;
+            margin-right: 8px;
+            letter-spacing: 0.3px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .list-item .delete-btn {
+            flex-shrink: 0;
+            background: transparent;
+            border: none;
+            color: #5a6a7e;
+            font-size: 1.1rem;
+            padding: 4px 6px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background 0.15s, color 0.15s;
+            touch-action: manipulation;
+            line-height: 1;
+        }
+        .list-item .delete-btn:active {
+            background: #2a1a1a;
+            color: #ff6b6b;
+        }
+
+        @keyframes slideIn {
+            0% {
+                opacity: 0;
+                transform: translateY(-8px) scale(0.97);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* ─── Bottom Action Bar ─── */
+        .bottom-bar {
+            flex-shrink: 0;
+            padding: 10px 16px 14px;
+            background: #0b0d11;
+            border-top: 1px solid #171b24;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            z-index: 10;
+            padding-bottom: max(14px, env(safe-area-inset-bottom));
+        }
+
+        .btn-primary {
+            flex: 1;
+            background: #00b894;
+            border: none;
+            color: #0b0d11;
+            font-size: 1rem;
+            font-weight: 600;
+            padding: 14px 16px;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            touch-action: manipulation;
+            letter-spacing: 0.3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 54px;
+        }
+        .btn-primary:active {
+            background: #00d4a0;
+            transform: scale(0.97);
+        }
+        .btn-primary:disabled {
+            opacity: 0.4;
+            transform: none;
+            pointer-events: none;
+        }
+
+        .btn-secondary {
+            flex-shrink: 0;
+            background: #1a1f2a;
+            border: none;
+            color: #8e9bb5;
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 14px 18px;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            touch-action: manipulation;
+            min-height: 54px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-secondary:active {
+            background: #2a303e;
+            color: #e8edf5;
+        }
+
+        /* ─── Toast ─── */
+        .toast {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #1a1f2a;
+            color: #e8edf5;
+            padding: 12px 28px;
+            border-radius: 16px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            z-index: 100;
+            max-width: 85vw;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        .toast .emoji {
+            margin-right: 10px;
+        }
+
+        /* ─── Responsive tweaks ─── */
+        @media (max-width: 420px) {
+            .header h1 {
+                font-size: 0.95rem;
+            }
+            .counter-wrap .count {
+                font-size: 1.3rem;
+            }
+            .target-rect {
+                width: 70%;
+            }
+            .list-item .code {
+                font-size: 0.75rem;
+            }
+            .btn-primary {
+                font-size: 0.9rem;
+                padding: 12px 14px;
+                min-height: 48px;
+            }
+            .btn-secondary {
+                font-size: 0.7rem;
+                padding: 12px 14px;
+                min-height: 48px;
+            }
+            .perm-overlay .btn-start {
+                min-width: 160px;
+                padding: 12px 24px;
+                font-size: 1rem;
+            }
+        }
+
+        @media (min-width: 600px) {
+            .camera-wrapper {
+                height: 45vh;
+                height: 45dvh;
+                max-height: 50vh;
+                max-height: 50dvh;
+            }
+            .target-rect {
+                width: 50%;
+                max-width: 340px;
+            }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+
+        <!-- Header -->
+        <header class="header">
+            <h1>
+                📦 Bulk Scan
+                <span class="badge">v1</span>
+            </h1>
+            <div class="header-actions">
+                <button id="btnClearAll" aria-label="Clear all scans" title="Clear all">🗑️</button>
+            </div>
+        </header>
+
+        <!-- Camera -->
+        <div class="camera-wrapper" id="cameraWrapper">
+            <div id="reader"></div>
+
+            <!-- Target Overlay -->
+            <div class="target-overlay" id="targetOverlay">
+                <div class="target-rect" id="targetRect">
+                    <span class="corner tl"></span>
+                    <span class="corner tr"></span>
+                    <span class="corner bl"></span>
+                    <span class="corner br"></span>
+                    <div class="scan-line"></div>
+                </div>
+            </div>
+
+            <div class="viewfinder-hint">Align barcode in the frame</div>
+
+            <!-- Permission / Welcome Overlay -->
+            <div class="perm-overlay" id="permOverlay">
+                <div class="icon" id="overlayIcon">📷</div>
+                <h2 id="overlayTitle">Ready to Scan</h2>
+                <p id="overlayDesc">Tap the button below to start the camera and scan barcodes.</p>
+                <button class="btn-start" id="btnStartScanner">Start Scanning</button>
+                <div class="error-msg" id="errorMsg"></div>
+                <button class="sub-action hidden" id="btnRetry">Retry</button>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="counter-wrap">
+                <span class="label">Scanned</span>
+                <span class="count" id="countDisplay">0</span>
+                <span style="color:#4a5568;font-size:0.7rem;font-weight:400;margin-left:2px;">unique</span>
+            </div>
+            <div class="status-actions">
+                <button id="btnClearLast" title="Remove last scan">↩ Undo</button>
+            </div>
+        </div>
+
+        <!-- Scanned List -->
+        <div class="list-container" id="listContainer">
+            <div class="list-empty" id="listEmpty">
+                <div class="icon">🔲</div>
+                <p>Scan your first barcode.<br />It will appear here instantly.</p>
+            </div>
+            <div id="listItems"></div>
+        </div>
+
+        <!-- Bottom Bar -->
+        <div class="bottom-bar">
+            <button class="btn-secondary" id="btnClearSession">✕ Clear</button>
+            <button class="btn-primary" id="btnCopyBatch">
+                <span>📋</span> Complete &amp; Copy Batch
+            </button>
+        </div>
+
+        <!-- Toast -->
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            // ─── DOM refs ───
+            const countDisplay = document.getElementById('countDisplay');
+            const listItems = document.getElementById('listItems');
+            const listEmpty = document.getElementById('listEmpty');
+            const listContainer = document.getElementById('listContainer');
+            const targetRect = document.getElementById('targetRect');
+            const permOverlay = document.getElementById('permOverlay');
+            const btnStartScanner = document.getElementById('btnStartScanner');
+            const btnRetry = document.getElementById('btnRetry');
+            const errorMsg = document.getElementById('errorMsg');
+            const overlayIcon = document.getElementById('overlayIcon');
+            const overlayTitle = document.getElementById('overlayTitle');
+            const overlayDesc = document.getElementById('overlayDesc');
+            const btnCopyBatch = document.getElementById('btnCopyBatch');
+            const btnClearSession = document.getElementById('btnClearSession');
+            const btnClearLast = document.getElementById('btnClearLast');
+            const btnClearAll = document.getElementById('btnClearAll');
+            const toast = document.getElementById('toast');
+
+            // ─── State ───
+            let scannedCodes = [];
+            let uniqueSet = new Set();
+            let lastScan = null;
+            const COOLDOWN_MS = 2000;
+            let scanner = null;
+            let isScanning = false;
+            let toastTimer = null;
+            let isStarting = false;
+
+            // ─── Audio: beep via Web Audio ───
+            function playBeep() {
+                try {
+                    const ctx = new(window.AudioContext || window.webkitAudioContext)();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.frequency.value = 880;
+                    osc.type = 'sine';
+                    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+                    osc.start(ctx.currentTime);
+                    osc.stop(ctx.currentTime + 0.12);
+                } catch (_) {}
+            }
+
+            // ─── Haptic ───
+            function triggerHaptic() {
+                try {
+                    if (navigator.vibrate) navigator.vibrate(80);
+                } catch (_) {}
+            }
+
+            // ─── Toast ───
+            function showToast(message, emoji = '✅', duration = 2200) {
+                if (toastTimer) {
+                    clearTimeout(toastTimer);
+                    toast.classList.remove('show');
+                }
+                toast.innerHTML = `<span class="emoji">${emoji}</span> ${message}`;
+                void toast.offsetWidth;
+                toast.classList.add('show');
+                toastTimer = setTimeout(() => {
+                    toast.classList.remove('show');
+                    toastTimer = null;
+                }, duration);
+            }
+
+            // ─── Update UI ───
+            function renderList() {
+                listItems.innerHTML = '';
+                if (scannedCodes.length === 0) {
+                    listEmpty.classList.remove('hidden');
+                    return;
+                }
+                listEmpty.classList.add('hidden');
+
+                const reversed = [...scannedCodes].reverse();
+                for (const item of reversed) {
+                    const row = document.createElement('div');
+                    row.className = 'list-item';
+                    row.dataset.value = item.value;
+
+                    const codeSpan = document.createElement('span');
+                    codeSpan.className = 'code';
+                    const formatLabel = item.format || 'BARCODE';
+                    codeSpan.innerHTML =
+                        `<span class="badge-format">${formatLabel}</span> ${escapeHtml(item.value)}`;
+
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'delete-btn';
+                    delBtn.textContent = '✕';
+                    delBtn.setAttribute('aria-label', 'Delete scan');
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        deleteScan(item.value);
+                    });
+                    delBtn.addEventListener('touchend', (e) => {
+                        e.preventDefault();
+                        deleteScan(item.value);
+                    });
+
+                    row.appendChild(codeSpan);
+                    row.appendChild(delBtn);
+                    listItems.appendChild(row);
+                }
+                countDisplay.textContent = uniqueSet.size;
+            }
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            function deleteScan(value) {
+                const idx = scannedCodes.findIndex(item => item.value === value);
+                if (idx === -1) return;
+                scannedCodes.splice(idx, 1);
+                uniqueSet = new Set(scannedCodes.map(item => item.value));
+                renderList();
+                countDisplay.textContent = uniqueSet.size;
+                if (scannedCodes.length === 0) {
+                    listEmpty.classList.remove('hidden');
+                }
+            }
+
+            function clearAllScans() {
+                if (scannedCodes.length === 0) return;
+                scannedCodes = [];
+                uniqueSet = new Set();
+                renderList();
+                countDisplay.textContent = '0';
+                listEmpty.classList.remove('hidden');
+                showToast('Session cleared', '🗑️', 1500);
+            }
+
+            function undoLastScan() {
+                if (scannedCodes.length === 0) return;
+                const last = scannedCodes[scannedCodes.length - 1];
+                deleteScan(last.value);
+                showToast(`Removed: ${last.value}`, '↩', 1200);
+            }
+
+            // ─── Add scan ───
+            function addScan(value, format) {
+                const now = Date.now();
+                if (lastScan && lastScan.value === value) {
+                    if (now - lastScan.timestamp < COOLDOWN_MS) {
+                        return false;
+                    }
+                }
+                lastScan = { value, timestamp: now };
+
+                const isDuplicate = uniqueSet.has(value);
+                if (!isDuplicate) {
+                    uniqueSet.add(value);
+                }
+
+                scannedCodes.push({
+                    value: value,
+                    format: format || 'CODE',
+                    timestamp: now
+                });
+
+                renderList();
+                countDisplay.textContent = uniqueSet.size;
+
+                targetRect.classList.add('flash');
+                setTimeout(() => targetRect.classList.remove('flash'), 300);
+
+                playBeep();
+                triggerHaptic();
+
+                if (listContainer) {
+                    listContainer.scrollTop = 0;
+                }
+                return true;
+            }
+
+            // ─── Copy batch ───
+            async function copyBatch() {
+                if (scannedCodes.length === 0) {
+                    showToast('No barcodes to copy', '⚠️', 1800);
+                    return;
+                }
+                const lines = scannedCodes.map(item => item.value);
+                const text = lines.join('\n');
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.left = '-9999px';
+                        ta.style.top = '-9999px';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                    }
+                    showToast(`Copied ${scannedCodes.length} barcodes to clipboard`, '📋', 2500);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    showToast('Failed to copy. Please try again.', '❌', 2000);
+                }
+            }
+
+            // ─── Scanner setup ───
+            async function initScanner() {
+                if (isStarting) return;
+                if (scanner && isScanning) {
+                    permOverlay.classList.add('hidden');
+                    errorMsg.textContent = '';
+                    return;
+                }
+
+                isStarting = true;
+                btnStartScanner.disabled = true;
+                errorMsg.textContent = '';
+                btnRetry.classList.add('hidden');
+                overlayIcon.textContent = '⏳';
+                overlayTitle.textContent = 'Starting Camera...';
+                overlayDesc.textContent = 'Please allow camera access when prompted.';
+
+                // Clean up any previous scanner
+                if (scanner) {
+                    try { scanner.stop(); } catch (_) {}
+                    try { scanner.clear(); } catch (_) {}
+                    scanner = null;
+                }
+
+                try {
+                    scanner = new Html5Qrcode('reader');
+
+                    const config = {
+                        fps: 15,
+                        qrbox: {
+                            width: window.innerWidth < 420 ? 180 : 240,
+                            height: window.innerWidth < 420 ? 120 : 160,
+                        },
+                        aspectRatio: 1.0,
+                    };
+
+                    // Try to use rear camera; fallback to any available
+                    let cameraId = { facingMode: 'environment' };
+                    try {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                        const hasEnv = videoDevices.some(d => d.label && d.label.toLowerCase().includes('back'));
+                        if (!hasEnv && videoDevices.length > 0) {
+                            cameraId = { deviceId: videoDevices[0].deviceId };
+                        }
+                    } catch (_) {}
+
+                    await scanner.start(
+                        cameraId,
+                        config,
+                        onScanSuccess,
+                        onScanError
+                    );
+
+                    isScanning = true;
+                    isStarting = false;
+                    btnStartScanner.disabled = false;
+                    permOverlay.classList.add('hidden');
+                    errorMsg.textContent = '';
+                    overlayIcon.textContent = '📷';
+                    overlayTitle.textContent = 'Ready to Scan';
+                    overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
+                    btnStartScanner.textContent = 'Start Scanning';
+                    btnRetry.classList.add('hidden');
+
+                } catch (err) {
+                    console.error('Scanner start error:', err);
+                    isStarting = false;
+                    btnStartScanner.disabled = false;
+                    permOverlay.classList.remove('hidden');
+                    let errorMessage = 'Unable to access camera. ';
+                    if (err && err.message) {
+                        if (err.message.includes('Permission')) {
+                            errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
+                        } else if (err.message.includes('NotAllowedError')) {
+                            errorMessage = 'Camera access was blocked. Please allow camera permission and retry.';
+                        } else if (err.message.includes('NotFoundError')) {
+                            errorMessage = 'No camera found on your device.';
+                        } else {
+                            errorMessage += err.message;
+                        }
+                    } else {
+                        errorMessage += 'Please allow camera permission and try again.';
+                    }
+                    errorMsg.textContent = errorMessage;
+                    btnRetry.classList.remove('hidden');
+                    overlayIcon.textContent = '⚠️';
+                    overlayTitle.textContent = 'Camera Error';
+                    overlayDesc.textContent = 'Could not start the camera.';
+                    btnStartScanner.textContent = 'Retry';
+                    isScanning = false;
+                }
+            }
+
+            // ─── Scan callbacks ───
+            function onScanSuccess(decodedText, decodedResult) {
+                let format = 'CODE';
+                try {
+                    if (decodedResult && decodedResult.result && decodedResult.result.format) {
+                        format = decodedResult.result.format.format || 'CODE';
+                    }
+                } catch (_) {}
+                const value = decodedText.trim();
+                if (!value) return;
+                addScan(value, format);
+            }
+
+            function onScanError(err) {
+                // ignore normal no-barcode errors
+                if (err && err.toString && (err.toString().includes('NotFoundException') || err.toString().includes(
+                        'NoMultiFormatReaders'))) {
+                    return;
+                }
+                if (Math.random() < 0.01) console.debug('Scan error:', err);
+            }
+
+            // ─── Stop scanner ───
+            function stopScanner() {
+                if (scanner && isScanning) {
+                    try {
+                        scanner.stop();
+                        isScanning = false;
+                    } catch (_) {}
+                }
+            }
+
+            // ─── Retry / restart ───
+            function retryScanner() {
+                stopScanner();
+                // Reset overlay to default
+                overlayIcon.textContent = '📷';
+                overlayTitle.textContent = 'Ready to Scan';
+                overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
+                btnStartScanner.textContent = 'Start Scanning';
+                errorMsg.textContent = '';
+                btnRetry.classList.add('hidden');
+                permOverlay.classList.remove('hidden');
+                initScanner();
+            }
+
+            // ─── Event listeners ───
+            btnStartScanner.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (isScanning) {
+                    permOverlay.classList.add('hidden');
+                    errorMsg.textContent = '';
+                    return;
+                }
+                // If the button says "Retry", we re-init
+                if (btnStartScanner.textContent === 'Retry') {
+                    retryScanner();
+                } else {
+                    initScanner();
+                }
+            });
+            btnStartScanner.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                btnStartScanner.click();
+            });
+
+            btnRetry.addEventListener('click', (e) => {
+                e.preventDefault();
+                retryScanner();
+            });
+            btnRetry.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                btnRetry.click();
+            });
+
+            btnCopyBatch.addEventListener('click', copyBatch);
+            btnCopyBatch.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                copyBatch();
+            });
+
+            btnClearSession.addEventListener('click', clearAllScans);
+            btnClearSession.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                clearAllScans();
+            });
+
+            btnClearLast.addEventListener('click', undoLastScan);
+            btnClearLast.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                undoLastScan();
+            });
+
+            btnClearAll.addEventListener('click', () => {
+                if (scannedCodes.length === 0) return;
+                if (confirm('Clear all scanned barcodes?')) {
+                    clearAllScans();
+                }
+            });
+
+            // Handle visibility change → pause/resume
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    if (scanner && isScanning) {
+                        try { scanner.pause(); } catch (_) {}
+                    }
+                } else {
+                    if (scanner && !isScanning) {
+                        try { scanner.resume(); } catch (_) {}
+                    } else if (!scanner && !permOverlay.classList.contains('hidden')) {
+                        // overlay visible, do nothing
+                    } else if (!scanner) {
+                        // maybe need to re-init? but we keep overlay
+                    }
+                }
+            });
+
+            // ─── Initial state ───
+            permOverlay.classList.remove('hidden');
+            errorMsg.textContent = '';
+            btnStartScanner.textContent = 'Start Scanning';
+            btnStartScanner.disabled = false;
+            btnRetry.classList.add('hidden');
+            overlayIcon.textContent = '📷';
+            overlayTitle.textContent = 'Ready to Scan';
+            overlayDesc.textContent = 'Tap the button below to start the camera and scan barcodes.';
+
+            // Check if camera is supported
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                permOverlay.classList.remove('hidden');
+                overlayIcon.textContent = '⚠️';
+                overlayTitle.textContent = 'Camera Not Supported';
+                overlayDesc.textContent = 'Your device or browser does not support camera access. Please use a modern browser with WebRTC support.';
+                btnStartScanner.style.display = 'none';
+                errorMsg.textContent = '';
+                return;
+            }
+
+            // ─── Page unload ───
+            window.addEventListener('beforeunload', () => {
+                stopScanner();
+            });
+
+            // ─── Expose for debugging ───
+            window.__scanner = {
+                addScan,
+                clearAllScans,
+                scannedCodes: () => [...scannedCodes],
+                uniqueCount: () => uniqueSet.size,
+                retry: retryScanner,
+            };
+
+        })();
+    </script>
+
+</body>
+</html>
